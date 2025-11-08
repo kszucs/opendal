@@ -123,6 +123,17 @@ impl HuggingfaceBuilder {
         }
         self
     }
+
+    /// configure the Hub base url. You might want to set this variable if your
+    /// organization is using a Private Hub https://huggingface.co/enterprise
+    ///
+    /// Default is "https://huggingface.co"
+    pub fn endpoint(mut self, endpoint: &str) -> Self {
+        if !endpoint.is_empty() {
+            self.config.endpoint = Some(endpoint.to_string());
+        }
+        self
+    }
 }
 
 impl Builder for HuggingfaceBuilder {
@@ -168,6 +179,20 @@ impl Builder for HuggingfaceBuilder {
 
         let token = self.config.token.as_ref().cloned();
 
+        let endpoint = match &self.config.endpoint {
+            Some(endpoint) => endpoint.clone(),
+            None => {
+                // Try to read from HF_ENDPOINT env var which is used
+                // by the official huggingface clients.
+                if let Ok(env_endpoint) = std::env::var("HF_ENDPOINT") {
+                    env_endpoint
+                } else {
+                    "https://huggingface.co".to_string()
+                }
+            }
+        };
+        debug!("backend use endpoint: {}", &endpoint);
+
         Ok(HuggingfaceBackend {
             core: Arc::new(HuggingfaceCore {
                 info: {
@@ -175,14 +200,10 @@ impl Builder for HuggingfaceBuilder {
                     am.set_scheme(DEFAULT_SCHEME)
                         .set_native_capability(Capability {
                             stat: true,
-
                             read: true,
-
                             list: true,
                             list_with_recursive: true,
-
                             shared: true,
-
                             ..Default::default()
                         });
                     am.into()
@@ -192,6 +213,7 @@ impl Builder for HuggingfaceBuilder {
                 revision,
                 root,
                 token,
+                endpoint,
             }),
         })
     }
