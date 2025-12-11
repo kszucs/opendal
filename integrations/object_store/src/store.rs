@@ -304,79 +304,55 @@ impl ObjectStore for OpendalStore {
         options: GetOptions,
     ) -> object_store::Result<GetResult> {
         let raw_location = percent_decode_path(location.as_ref());
-
-        // Check if we can skip the stat() call
-        // We can skip it when:
-        // 1. We have a bounded range (start and end are known)
-        // 2. No conditional headers are present
-        // 3. Not a HEAD request
-        let has_conditional_headers = options.if_match.is_some()
-            || options.if_none_match.is_some()
-            || options.if_modified_since.is_some()
-            || options.if_unmodified_since.is_some();
-
-        let can_skip_stat = !options.head
-            && !has_conditional_headers
-            && matches!(options.range, Some(GetRange::Bounded(_)));
-
-        let (meta, attributes) = if can_skip_stat {
-            // For bounded ranges without conditional headers, we don't need file metadata
-            // We'll create a minimal ObjectMeta later
-            (None, object_store::Attributes::new())
-        } else {
-            // Need to call stat() for HEAD requests, conditional headers, or non-bounded ranges
-            let opendal_meta = {
-                let mut s = self.inner.stat_with(&raw_location);
-                if let Some(version) = &options.version {
-                    s = s.version(version.as_str())
-                }
-                if let Some(if_match) = &options.if_match {
-                    s = s.if_match(if_match.as_str());
-                }
-                if let Some(if_none_match) = &options.if_none_match {
-                    s = s.if_none_match(if_none_match.as_str());
-                }
-                if let Some(if_modified_since) = options.if_modified_since {
-                    s = s.if_modified_since(if_modified_since);
-                }
-                if let Some(if_unmodified_since) = options.if_unmodified_since {
-                    s = s.if_unmodified_since(if_unmodified_since);
-                }
-                s.into_send()
-                    .await
-                    .map_err(|err| format_object_store_error(err, location.as_ref()))?
-            };
-
-            // Convert user defined metadata from OpenDAL to object_store attributes
-            let mut attributes = object_store::Attributes::new();
-            if let Some(user_meta) = opendal_meta.user_metadata() {
-                for (key, value) in user_meta {
-                    attributes.insert(
-                        object_store::Attribute::Metadata(key.clone().into()),
-                        value.clone().into(),
-                    );
-                }
+        let meta = {
+            let mut s = self.inner.stat_with(&raw_location);
+            if let Some(version) = &options.version {
+                s = s.version(version.as_str())
             }
-
-            let meta = ObjectMeta {
-                location: location.clone(),
-                last_modified: opendal_meta.last_modified().unwrap_or_default(),
-                size: opendal_meta.content_length(),
-                e_tag: opendal_meta.etag().map(|x| x.to_string()),
-                version: opendal_meta.version().map(|x| x.to_string()),
-            };
-
-            if options.head {
-                return Ok(GetResult {
-                    payload: GetResultPayload::Stream(Box::pin(futures::stream::empty())),
-                    range: 0..0,
-                    meta,
-                    attributes,
-                });
+            if let Some(if_match) = &options.if_match {
+                s = s.if_match(if_match.as_str());
             }
-
-            (Some(meta), attributes)
+            if let Some(if_none_match) = &options.if_none_match {
+                s = s.if_none_match(if_none_match.as_str());
+            }
+            if let Some(if_modified_since) = options.if_modified_since {
+                s = s.if_modified_since(if_modified_since);
+            }
+            if let Some(if_unmodified_since) = options.if_unmodified_since {
+                s = s.if_unmodified_since(if_unmodified_since);
+            }
+            s.into_send()
+                .await
+                .map_err(|err| format_object_store_error(err, location.as_ref()))?
         };
+
+        // Convert user defined metadata from OpenDAL to object_store attributes
+        let mut attributes = object_store::Attributes::new();
+        if let Some(user_meta) = meta.user_metadata() {
+            for (key, value) in user_meta {
+                attributes.insert(
+                    object_store::Attribute::Metadata(key.clone().into()),
+                    value.clone().into(),
+                );
+            }
+        }
+
+        let meta = ObjectMeta {
+            location: location.clone(),
+            last_modified: meta.last_modified().unwrap_or_default(),
+            size: meta.content_length(),
+            e_tag: meta.etag().map(|x| x.to_string()),
+            version: meta.version().map(|x| x.to_string()),
+        };
+
+        if options.head {
+            return Ok(GetResult {
+                payload: GetResultPayload::Stream(Box::pin(futures::stream::empty())),
+                range: 0..0,
+                meta,
+                attributes,
+            });
+        }
 
         let reader = {
             let mut r = self.inner.reader_with(raw_location.as_ref());
@@ -400,37 +376,24 @@ impl ObjectStore for OpendalStore {
                 .map_err(|err| format_object_store_error(err, location.as_ref()))?
         };
 
-        let (read_range, file_size) = match options.range {
+        let read_range = match options.range {
             Some(GetRange::Bounded(r)) => {
-                // For bounded ranges, use the range as-is
-                // No need for file size validation
-                let range = if r.start >= r.end {
+                if r.start >= r.end || r.start >= meta.size {
                     0..0
                 } else {
-                    r.start..r.end
-                };
-                (range.clone(), range.end)
+                    let end = r.end.min(meta.size);
+                    r.start..end
+                }
             }
             Some(GetRange::Offset(r)) => {
-                let size = meta.as_ref().unwrap().size;
-                if r < size {
-                    (r..size, size)
+                if r < meta.size {
+                    r..meta.size
                 } else {
-                    (0..0, size)
+                    0..0
                 }
             }
-            Some(GetRange::Suffix(r)) => {
-                let size = meta.as_ref().unwrap().size;
-                if r < size {
-                    ((size - r)..size, size)
-                } else {
-                    (0..size, size)
-                }
-            }
-            _ => {
-                let size = meta.as_ref().unwrap().size;
-                (0..size, size)
-            }
+            Some(GetRange::Suffix(r)) if r < meta.size => (meta.size - r)..meta.size,
+            _ => 0..meta.size,
         };
 
         let stream = reader
@@ -444,19 +407,10 @@ impl ObjectStore for OpendalStore {
                 source: Box::new(err),
             });
 
-        // Create ObjectMeta if we skipped stat()
-        let final_meta = meta.unwrap_or_else(|| ObjectMeta {
-            location: location.clone(),
-            last_modified: Default::default(),
-            size: file_size,
-            e_tag: None,
-            version: None,
-        });
-
         Ok(GetResult {
             payload: GetResultPayload::Stream(Box::pin(stream)),
             range: read_range.start..read_range.end,
-            meta: final_meta,
+            meta,
             attributes,
         })
     }
