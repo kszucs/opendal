@@ -6898,6 +6898,7 @@ dependencies = [
 name = "opendal-service-hf"
 version = "0.55.0"
 dependencies = [
+ "backon",
  "bytes",
  "futures",
  "hf-xet",

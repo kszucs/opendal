@@ -18,6 +18,8 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use backon::ExponentialBuilder;
+use backon::Retryable;
 use bytes::Buf;
 use bytes::Bytes;
 use http::Request;
@@ -35,14 +37,14 @@ use opendal_core::raw::*;
 use opendal_core::*;
 
 /// API payload structures for commit operations
-#[derive(Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub(super) struct CommitFile {
     pub path: String,
     pub content: String,
     pub encoding: String,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize)]
 pub(super) struct LfsFile {
     pub path: String,
     pub oid: String,
@@ -419,6 +421,8 @@ impl HfCore {
     /// Commit file changes to a git-based repo (model/dataset/space).
     ///
     /// Counterpart of [`commit_bucket`](Self::commit_bucket) for bucket repos.
+    /// Retries on 412 (ConditionNotMatch) with exponential backoff, since
+    /// concurrent writers can race on the git branch HEAD.
     pub(super) async fn commit_git(
         &self,
         regular_files: Vec<CommitFile>,
@@ -426,8 +430,6 @@ impl HfCore {
         deleted_files: Vec<DeletedFile>,
         deleted_folders: Vec<DeletedFolder>,
     ) -> Result<CommitResponse> {
-        let url = self.repo.git_commit_url(&self.endpoint);
-
         let payload = MixedCommitPayload {
             summary: "Commit via OpenDAL".to_string(),
             files: regular_files,
@@ -436,17 +438,31 @@ impl HfCore {
             deleted_folders,
         };
 
+        let url = self.repo.git_commit_url(&self.endpoint);
         let json_body = serde_json::to_vec(&payload).map_err(new_json_serialize_error)?;
 
-        let req = self
-            .request(http::Method::POST, &url, Operation::Write)?
-            .header(header::CONTENT_TYPE, "application/json")
-            .header(header::CONTENT_LENGTH, json_body.len())
-            .body(Buffer::from(json_body))
-            .map_err(new_request_build_error)?;
+        let send = || async {
+            let req = self
+                .request(http::Method::POST, &url, Operation::Write)?
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_LENGTH, json_body.len())
+                .body(Buffer::from(json_body.clone()))
+                .map_err(new_request_build_error)?;
+            let (_, resp) = self.send_parse::<CommitResponse>(req).await?;
+            Ok(resp)
+        };
 
-        let (_, resp) = self.send_parse::<CommitResponse>(req).await?;
-        Ok(resp)
+        send.retry(
+            ExponentialBuilder::default()
+                .with_min_delay(std::time::Duration::from_millis(500))
+                .with_max_times(5)
+                .with_jitter(),
+        )
+        .when(|e: &Error| e.kind() == ErrorKind::ConditionNotMatch)
+        .notify(|err, dur| {
+            log::warn!("git commit conflict, retrying after {dur:?}: {err}");
+        })
+        .await
     }
 
     /// Commit file changes to a bucket repo via the NDJSON batch API.

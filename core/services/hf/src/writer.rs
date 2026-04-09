@@ -60,7 +60,8 @@ impl HfWriter {
     /// 1. Commit data to XET CAS (may already be done by `stream.finish()`)
     /// 2. Register the file via git LFS commit or bucket batch API
     ///
-    /// Retries on transient CAS propagation delays.
+    /// Git-based repos retry on 412 (branch concurrency conflict) with
+    /// exponential backoff, since concurrent writers can race on the branch HEAD.
     async fn commit(&mut self, file_info: &XetFileInfo) -> Result<Metadata> {
         // Finalize the XET CAS upload. May return AlreadyCompleted
         // if stream.finish() already committed internally.
@@ -97,6 +98,7 @@ impl HfWriter {
                 algo: "sha256".to_string(),
                 size: content_length,
             };
+
             self.core
                 .commit_git(vec![], vec![lfs_file], vec![], vec![])
                 .await?;
