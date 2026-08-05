@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "data_structure.hpp"
+#include "error.hpp"
 #include "layer.hpp"
 
 namespace opendal {

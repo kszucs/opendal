@@ -15,9 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use anyhow::Result;
 use opendal as od;
 
+use super::error::FfiError;
+use super::error::Result;
 use super::ffi;
 
 pub struct Reader {
@@ -46,7 +47,7 @@ impl Reader {
         self.position = self
             .position
             .checked_add(u64::try_from(n)?)
-            .ok_or_else(|| anyhow::anyhow!("reader position overflow"))?;
+            .ok_or_else(|| FfiError::other("reader position overflow"))?;
         Ok(n)
     }
 
@@ -54,7 +55,7 @@ impl Reader {
         let len = u64::try_from(buf.len())?;
         let end = offset
             .checked_add(len)
-            .ok_or_else(|| anyhow::anyhow!("read range end overflow"))?;
+            .ok_or_else(|| FfiError::other("read range end overflow"))?;
         Ok(self.reader.read_into(&mut buf, offset..end)?)
     }
 
@@ -63,11 +64,11 @@ impl Reader {
             ffi::SeekFrom::Start => 0,
             ffi::SeekFrom::Current => i128::from(self.position),
             ffi::SeekFrom::End => i128::from(self.content_length),
-            _ => return Err(anyhow::anyhow!("invalid seek dir")),
+            _ => return Err(FfiError::other("invalid seek dir")),
         };
         let pos = base + i128::from(offset);
         if pos < 0 {
-            return Err(anyhow::anyhow!("invalid seek to negative position"));
+            return Err(FfiError::other("invalid seek to negative position"));
         }
 
         self.position = u64::try_from(pos)?;

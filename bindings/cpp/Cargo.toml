@@ -46,3 +46,17 @@ cxx-build = { version = "1.0.186" }
 [features]
 async = ["cxx-async", "cxx/c++20"]
 testing = ["dep:bytes"]
+# Service features are forwarded to the core crate so that a caller can select
+# backends through this crate's own feature list (and hence through CMake's
+# OPENDAL_FEATURES) rather than having to depend on opendal directly. Without
+# these, passing e.g. -DOPENDAL_FEATURES=services-s3 fails outright, because
+# this crate declares no such feature to forward.
+#
+# fs and memory need no network, which is what makes them usable from tests.
+services-azblob = ["opendal/services-azblob"]
+services-fs = ["opendal/services-fs"]
+services-gcs = ["opendal/services-gcs"]
+services-hf = ["opendal/services-hf"]
+services-http = ["opendal/services-http"]
+services-memory = ["opendal/services-memory"]
+services-s3 = ["opendal/services-s3"]

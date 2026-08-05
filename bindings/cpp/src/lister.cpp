@@ -18,6 +18,7 @@
  */
 
 #include "data_structure.hpp"
+#include "ffi_error.hpp"
 #include "lib.rs.h"
 #include "opendal.hpp"
 #include "utils/ffi_converter.hpp"
@@ -40,7 +41,7 @@ Lister::Lister(Lister &&other) noexcept : lister_{other.lister_} {
 Lister::~Lister() noexcept { Destroy(); }
 
 std::optional<Entry> Lister::Next() {
-  auto entry = lister_->next();
+  auto entry = details::Call([&] { return lister_->next(); });
 
   if (!entry.has_value) {
     return std::nullopt;

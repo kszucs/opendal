@@ -17,6 +17,7 @@
 
 #[cfg(feature = "async")]
 mod r#async;
+mod error;
 mod layer;
 mod lister;
 mod reader;
@@ -31,7 +32,7 @@ pub use layer::LayerBuilder;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use anyhow::Result;
+use error::Result;
 use lister::Lister;
 use od::raw::Timestamp;
 use opendal as od;

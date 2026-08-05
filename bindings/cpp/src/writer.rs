@@ -15,8 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use anyhow::Result;
 use opendal as od;
+
+use super::error::Result;
 pub struct Writer(pub od::blocking::Writer);
 
 impl Writer {

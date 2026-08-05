@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <iterator>
 
+#include "ffi_error.hpp"
 #include "lib.rs.h"
 #include "opendal.hpp"
 
@@ -44,11 +45,15 @@ void Writer::Write(std::string_view data) {
   rust::Vec<uint8_t> bytes;
   bytes.reserve(data.size());
   std::copy(data.begin(), data.end(), std::back_inserter(bytes));
-  writer_->write(bytes);
+  details::Call([&] { writer_->write(bytes); });
 }
 
-void Writer::Flush() { writer_->flush(); }
+void Writer::Flush() {
+  details::Call([&] { writer_->flush(); });
+}
 
-void Writer::Close() { writer_->close(); }
+void Writer::Close() {
+  details::Call([&] { writer_->close(); });
+}
 
 }  // namespace opendal

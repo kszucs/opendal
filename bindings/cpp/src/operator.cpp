@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <ctime>
 
+#include "ffi_error.hpp"
 #include "lib.rs.h"
 #include "opendal.hpp"
 #include "utils/ffi_converter.hpp"
@@ -283,7 +284,9 @@ Operator::Operator(std::string_view scheme,
     }
   }
 
-  operator_ = ffi::new_operator(utils::rust_str(scheme), rust_map, *layers);
+  operator_ = details::Call([&] {
+    return ffi::new_operator(utils::rust_str(scheme), rust_map, *layers);
+  });
 }
 
 Operator::~Operator() noexcept { Destroy(); }
@@ -308,65 +311,78 @@ bool Operator::Available() const { return operator_ != nullptr; }
 // We can't avoid copy, because std::vector hides the internal structure.
 // std::vector doesn't support init from a pointer without copy.
 std::string Operator::Read(std::string_view path) {
-  auto rust_vec = operator_->read(utils::rust_str(path));
+  auto rust_vec =
+      details::Call([&] { return operator_->read(utils::rust_str(path)); });
   return {rust_vec.begin(), rust_vec.end()};
 }
 
 std::string Operator::Read(std::string_view path, const ReadOptions &options) {
-  auto rust_vec =
-      operator_->read_options(utils::rust_str(path), ToFfiOptions(options));
+  auto rust_vec = details::Call([&] {
+    return operator_->read_options(utils::rust_str(path),
+                                   ToFfiOptions(options));
+  });
   return {rust_vec.begin(), rust_vec.end()};
 }
 
 void Operator::Write(std::string_view path, std::string_view data) {
   rust::Vec<uint8_t> vec;
   std::copy(data.begin(), data.end(), std::back_inserter(vec));
-  operator_->write(utils::rust_str(path), vec);
+  details::Call([&] { operator_->write(utils::rust_str(path), vec); });
 }
 
 void Operator::Write(std::string_view path, std::string_view data,
                      const WriteOptions &options) {
   rust::Vec<uint8_t> vec;
   std::copy(data.begin(), data.end(), std::back_inserter(vec));
-  operator_->write_options(utils::rust_str(path), vec, ToFfiOptions(options));
+  details::Call([&] {
+    operator_->write_options(utils::rust_str(path), vec, ToFfiOptions(options));
+  });
 }
 
 bool Operator::Exists(std::string_view path) {
-  return operator_->exists(utils::rust_str(path));
+  return details::Call([&] { return operator_->exists(utils::rust_str(path)); });
 }
 
 bool Operator::IsExist(std::string_view path) { return Exists(path); }
 
 void Operator::CreateDir(std::string_view path) {
-  operator_->create_dir(utils::rust_str(path));
+  details::Call([&] { operator_->create_dir(utils::rust_str(path)); });
 }
 
 void Operator::Copy(std::string_view src, std::string_view dst) {
-  operator_->copy(utils::rust_str(src), utils::rust_str(dst));
+  details::Call(
+      [&] { operator_->copy(utils::rust_str(src), utils::rust_str(dst)); });
 }
 
 void Operator::Copy(std::string_view src, std::string_view dst,
                     const CopyOptions &options) {
-  operator_->copy_options(utils::rust_str(src), utils::rust_str(dst),
-                          ToFfiOptions(options));
+  details::Call([&] {
+    operator_->copy_options(utils::rust_str(src), utils::rust_str(dst),
+                            ToFfiOptions(options));
+  });
 }
 
 void Operator::Rename(std::string_view src, std::string_view dst) {
-  operator_->rename(utils::rust_str(src), utils::rust_str(dst));
+  details::Call(
+      [&] { operator_->rename(utils::rust_str(src), utils::rust_str(dst)); });
 }
 
 void Operator::Rename(std::string_view src, std::string_view dst,
                       const RenameOptions &options) {
-  operator_->rename_options(utils::rust_str(src), utils::rust_str(dst),
-                            ToFfiOptions(options));
+  details::Call([&] {
+    operator_->rename_options(utils::rust_str(src), utils::rust_str(dst),
+                              ToFfiOptions(options));
+  });
 }
 
 void Operator::Remove(std::string_view path) {
-  operator_->remove(utils::rust_str(path));
+  details::Call([&] { operator_->remove(utils::rust_str(path)); });
 }
 
 void Operator::Remove(std::string_view path, const DeleteOptions &options) {
-  operator_->remove_options(utils::rust_str(path), ToFfiOptions(options));
+  details::Call([&] {
+    operator_->remove_options(utils::rust_str(path), ToFfiOptions(options));
+  });
 }
 
 void Operator::RemoveAll(const std::vector<std::string> &paths) {
@@ -375,20 +391,24 @@ void Operator::RemoveAll(const std::vector<std::string> &paths) {
   for (const auto &path : paths) {
     rust_paths.push_back(utils::rust_string(path));
   }
-  operator_->remove_all(std::move(rust_paths));
+  details::Call([&] { operator_->remove_all(std::move(rust_paths)); });
 }
 
 Metadata Operator::Stat(std::string_view path) {
-  return parse_meta_data(operator_->stat(utils::rust_str(path)));
+  return parse_meta_data(
+      details::Call([&] { return operator_->stat(utils::rust_str(path)); }));
 }
 
 Metadata Operator::Stat(std::string_view path, const StatOptions &options) {
-  return parse_meta_data(
-      operator_->stat_options(utils::rust_str(path), ToFfiOptions(options)));
+  return parse_meta_data(details::Call([&] {
+    return operator_->stat_options(utils::rust_str(path),
+                                   ToFfiOptions(options));
+  }));
 }
 
 std::vector<Entry> Operator::List(std::string_view path) {
-  auto rust_vec = operator_->list(utils::rust_str(path));
+  auto rust_vec =
+      details::Call([&] { return operator_->list(utils::rust_str(path)); });
 
   std::vector<Entry> entries;
   entries.reserve(rust_vec.size());
@@ -401,8 +421,10 @@ std::vector<Entry> Operator::List(std::string_view path) {
 
 std::vector<Entry> Operator::List(std::string_view path,
                                   const ListOptions &options) {
-  auto rust_vec =
-      operator_->list_options(utils::rust_str(path), ToFfiOptions(options));
+  auto rust_vec = details::Call([&] {
+    return operator_->list_options(utils::rust_str(path),
+                                   ToFfiOptions(options));
+  });
 
   std::vector<Entry> entries;
   entries.reserve(rust_vec.size());
@@ -414,36 +436,42 @@ std::vector<Entry> Operator::List(std::string_view path,
 }
 
 Lister Operator::GetLister(std::string_view path) {
-  return operator_->lister(utils::rust_str(path));
+  return details::Call([&] { return operator_->lister(utils::rust_str(path)); });
 }
 
 Lister Operator::GetLister(std::string_view path, const ListOptions &options) {
-  return operator_->lister_options(utils::rust_str(path),
-                                   ToFfiOptions(options));
+  return details::Call([&] {
+    return operator_->lister_options(utils::rust_str(path),
+                                     ToFfiOptions(options));
+  });
 }
 
 Reader Operator::GetReader(std::string_view path) {
-  return operator_->reader(utils::rust_str(path));
+  return details::Call([&] { return operator_->reader(utils::rust_str(path)); });
 }
 
 Reader Operator::GetReader(std::string_view path,
                            const ReaderOptions &options) {
-  return operator_->reader_options(utils::rust_str(path),
-                                   ToFfiOptions(options));
+  return details::Call([&] {
+    return operator_->reader_options(utils::rust_str(path),
+                                     ToFfiOptions(options));
+  });
 }
 
 Writer Operator::GetWriter(std::string_view path) {
-  return operator_->writer(utils::rust_str(path));
+  return details::Call([&] { return operator_->writer(utils::rust_str(path)); });
 }
 
 Writer Operator::GetWriter(std::string_view path, const WriteOptions &options) {
-  return operator_->writer_options(utils::rust_str(path),
-                                   ToFfiOptions(options));
+  return details::Call([&] {
+    return operator_->writer_options(utils::rust_str(path),
+                                     ToFfiOptions(options));
+  });
 }
 
 }  // namespace opendal
 opendal::Capability opendal::Operator::Info() {
-  auto op_info = operator_->info();
+  auto op_info = details::Call([&] { return operator_->info(); });
   return Capability{
       .stat = op_info.stat,
       .stat_with_if_match = op_info.stat_with_if_match,

@@ -17,6 +17,7 @@
  * under the License.
  */
 
+#include "ffi_error.hpp"
 #include "lib.rs.h"
 #include "opendal.hpp"
 
@@ -38,12 +39,16 @@ Reader::Reader(Reader &&other) noexcept : reader_{other.reader_} {
 Reader::~Reader() noexcept { Destroy(); }
 
 std::streamsize Reader::Read(void *s, std::streamsize n) {
-  return reader_->read(rust::Slice<uint8_t>(static_cast<uint8_t *>(s), n));
+  return details::Call([&] {
+    return reader_->read(rust::Slice<uint8_t>(static_cast<uint8_t *>(s), n));
+  });
 }
 
 std::streamsize Reader::ReadAt(void *s, std::streamsize n, uint64_t offset) {
-  return reader_->read_at(rust::Slice<uint8_t>(static_cast<uint8_t *>(s), n),
-                          offset);
+  return details::Call([&] {
+    return reader_->read_at(rust::Slice<uint8_t>(static_cast<uint8_t *>(s), n),
+                            offset);
+  });
 }
 
 ffi::SeekDir rust_seek_dir(std::ios_base::seekdir dir) {
@@ -58,12 +63,13 @@ ffi::SeekDir rust_seek_dir(std::ios_base::seekdir dir) {
       return ffi::SeekDir::End;
 
     default:
-      throw std::runtime_error("invalid seekdir");
+      throw Error(ErrorKind::Unexpected, /* temporary */ false,
+                  "invalid seekdir");
   }
 }
 
 std::streampos Reader::Seek(std::streamoff off, std::ios_base::seekdir dir) {
-  return reader_->seek(off, rust_seek_dir(dir));
+  return details::Call([&] { return reader_->seek(off, rust_seek_dir(dir)); });
 }
 
 }  // namespace opendal
