@@ -21,7 +21,6 @@
 
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
 namespace opendal {
 
@@ -63,22 +62,16 @@ enum class ErrorKind : int {
 };
 
 /**
- * @brief Human-readable name of a kind, e.g. "NotFound". Returns "Unknown" for
- * a value this build does not recognise.
- */
-std::string_view ToStringView(ErrorKind kind) noexcept;
-
-/**
  * @class Error
- * @brief The exception every failing OpenDAL C++ API throws.
+ * @brief The exception thrown when an OpenDAL operation fails.
  *
- * Derives from `std::runtime_error` so that callers who only catch
- * `std::exception` keep working, while callers who care about the category can
- * inspect Kind() and IsTemporary().
+ * Derives from `std::runtime_error`, whose what() is OpenDAL's own message, so
+ * that callers who only catch `std::exception` keep working, while callers who
+ * care about the category can inspect Kind() and IsTemporary().
  */
 class Error : public std::runtime_error {
  public:
-  Error(ErrorKind kind, bool temporary, std::string message);
+  Error(ErrorKind kind, bool temporary, const std::string &message);
 
   /// The failure's category.
   ErrorKind Kind() const noexcept { return kind_; }
@@ -91,13 +84,9 @@ class Error : public std::runtime_error {
    */
   bool IsTemporary() const noexcept { return temporary_; }
 
-  /// The underlying message, without the kind prefix that what() adds.
-  const std::string &Message() const noexcept { return message_; }
-
  private:
   ErrorKind kind_;
   bool temporary_;
-  std::string message_;
 };
 
 }  // namespace opendal
