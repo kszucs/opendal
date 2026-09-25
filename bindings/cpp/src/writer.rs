@@ -21,8 +21,8 @@ use super::error::Result;
 pub struct Writer(pub od::blocking::Writer);
 
 impl Writer {
-    pub fn write(&mut self, bs: Vec<u8>) -> Result<()> {
-        self.0.write(bs)?;
+    pub fn write(&mut self, bs: &[u8]) -> Result<()> {
+        self.0.write(bs.to_vec())?;
         Ok(())
     }
 

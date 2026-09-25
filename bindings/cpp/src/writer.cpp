@@ -17,12 +17,10 @@
  * under the License.
  */
 
-#include <algorithm>
-#include <iterator>
-
 #include "ffi_error.hpp"
 #include "lib.rs.h"
 #include "opendal.hpp"
+#include "utils/rust_converter.hpp"
 
 namespace opendal {
 
@@ -33,19 +31,17 @@ void Writer::Destroy() noexcept {
   }
 }
 
-Writer::Writer(ffi::Writer *writer) noexcept : writer_{writer} {}
+Writer::Writer(ffi::Writer* writer) noexcept : writer_{writer} {}
 
-Writer::Writer(Writer &&other) noexcept : writer_{other.writer_} {
+Writer::Writer(Writer&& other) noexcept : writer_{other.writer_} {
   other.writer_ = nullptr;
 }
 
 Writer::~Writer() noexcept { Destroy(); }
 
 void Writer::Write(std::string_view data) {
-  rust::Vec<uint8_t> bytes;
-  bytes.reserve(data.size());
-  std::copy(data.begin(), data.end(), std::back_inserter(bytes));
-  details::Call([&] { writer_->write(bytes); });
+  details::Call(
+      [&] { writer_->write(utils::rust_slice<const uint8_t>(data)); });
 }
 
 void Writer::Flush() {
