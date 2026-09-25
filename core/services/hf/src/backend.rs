@@ -146,11 +146,26 @@ impl HfBuilder {
         self
     }
 
+    /// Disable loading configuration from the environment: `HF_TOKEN`, the token
+    /// file, `HF_ENDPOINT` and `HF_HUB_DISABLE_XET` are ignored.
+    pub fn disable_config_load(mut self) -> Self {
+        self.config.disable_config_load = true;
+        self
+    }
+
+    /// Reads an environment variable unless config loading is disabled.
+    fn env_var(&self, key: &str) -> Option<String> {
+        if self.config.disable_config_load {
+            return None;
+        }
+        std::env::var(key).ok()
+    }
+
     fn hf_endpoint(&self) -> String {
         self.config
             .endpoint
             .clone()
-            .or_else(|| std::env::var("HF_ENDPOINT").ok())
+            .or_else(|| self.env_var("HF_ENDPOINT"))
             .unwrap_or_else(|| "https://huggingface.co".to_string())
     }
 
@@ -160,7 +175,7 @@ impl HfBuilder {
         if let Some(mode) = self.config.download_mode {
             return mode;
         }
-        if let Ok(val) = std::env::var("HF_HUB_DISABLE_XET")
+        if let Some(val) = self.env_var("HF_HUB_DISABLE_XET")
             && !val.is_empty()
         {
             return HfDownloadMode::Http;
@@ -184,6 +199,9 @@ impl HfBuilder {
     fn hf_token(&self) -> Option<String> {
         if let Some(t) = self.config.token.clone() {
             return Some(t);
+        }
+        if self.config.disable_config_load {
+            return None;
         }
         if let Ok(val) = std::env::var("HF_HUB_DISABLE_IMPLICIT_TOKEN")
             && !val.is_empty()
@@ -522,6 +540,27 @@ mod tests {
         unsafe { std::env::remove_var("HF_HUB_DISABLE_IMPLICIT_TOKEN") };
         unsafe { std::env::remove_var("HF_TOKEN") };
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn disable_config_load_ignores_environment() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("HF_HUB_DISABLE_IMPLICIT_TOKEN") };
+        unsafe { std::env::set_var("HF_TOKEN", "my-env-token") };
+        unsafe { std::env::set_var("HF_ENDPOINT", "https://env.example.com") };
+        unsafe { std::env::set_var("HF_HUB_DISABLE_XET", "1") };
+        let builder = builder_no_token().disable_config_load();
+        let (token, endpoint, mode) = (
+            builder.hf_token(),
+            builder.hf_endpoint(),
+            builder.hf_download_mode(),
+        );
+        unsafe { std::env::remove_var("HF_TOKEN") };
+        unsafe { std::env::remove_var("HF_ENDPOINT") };
+        unsafe { std::env::remove_var("HF_HUB_DISABLE_XET") };
+        assert_eq!(token, None);
+        assert_eq!(endpoint, "https://huggingface.co");
+        assert_eq!(mode, HfDownloadMode::Xet);
     }
 
     #[test]

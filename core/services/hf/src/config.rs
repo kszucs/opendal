@@ -60,6 +60,13 @@ pub struct HfConfig {
     ///
     /// See <https://huggingface.co/docs/huggingface_hub/package_reference/environment_variables#hfhubdisablexet>.
     pub download_mode: Option<HfDownloadMode>,
+    /// Disable loading configuration from the environment.
+    ///
+    /// When set, `HF_TOKEN`, the token file under `HF_HOME`, `HF_ENDPOINT` and
+    /// `HF_HUB_DISABLE_XET` are all ignored, so only the options set here apply.
+    /// Useful when the process environment belongs to someone else than the
+    /// requests, as in a server.
+    pub disable_config_load: bool,
 }
 
 impl Debug for HfConfig {
@@ -73,6 +80,7 @@ impl Debug for HfConfig {
             .field("revision", &self.revision)
             .field("root", &self.root)
             .field("download_mode", &self.download_mode)
+            .field("disable_config_load", &self.disable_config_load)
             .finish_non_exhaustive()
     }
 }
@@ -105,6 +113,19 @@ impl opendal_core::Configurator for HfConfig {
             .get("download_mode")
             .map(|s| HfDownloadMode::parse(s))
             .transpose()?;
+        let disable_config_load = opts
+            .get("disable_config_load")
+            .map(|s| {
+                s.parse::<bool>().map_err(|_| {
+                    opendal_core::Error::new(
+                        opendal_core::ErrorKind::ConfigInvalid,
+                        "disable_config_load must be true or false",
+                    )
+                    .with_context("service", HUGGINGFACE_SCHEME)
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
 
         if !path.is_empty() {
             // Full URI like "hf://datasets/user/repo@rev/path"
@@ -117,6 +138,7 @@ impl opendal_core::Configurator for HfConfig {
                 token: opts.get("token").cloned(),
                 endpoint: opts.get("endpoint").cloned(),
                 download_mode,
+                disable_config_load,
             })
         } else {
             // Bare scheme from via_iter, all config is in options.
@@ -138,6 +160,7 @@ impl opendal_core::Configurator for HfConfig {
                 token: opts.get("token").cloned(),
                 endpoint: opts.get("endpoint").cloned(),
                 download_mode,
+                disable_config_load,
             })
         }
     }
@@ -190,6 +213,32 @@ mod tests {
         assert_eq!(cfg.repo_id.as_deref(), Some("opendal/huggingface-testdata"));
         assert_eq!(cfg.revision.as_deref(), Some("main"));
         assert_eq!(cfg.root.as_deref(), Some("/testdata/"));
+    }
+
+    #[test]
+    fn from_uri_disable_config_load() {
+        let options = |value: &str| {
+            OperatorUri::new(
+                "huggingface",
+                vec![
+                    ("repo_type".to_string(), "dataset".to_string()),
+                    ("disable_config_load".to_string(), value.to_string()),
+                ],
+            )
+            .unwrap()
+        };
+
+        assert!(
+            HfConfig::from_uri(&options("true"))
+                .unwrap()
+                .disable_config_load
+        );
+        assert!(
+            !HfConfig::from_uri(&options("false"))
+                .unwrap()
+                .disable_config_load
+        );
+        assert!(HfConfig::from_uri(&options("yes")).is_err());
     }
 
     #[test]
